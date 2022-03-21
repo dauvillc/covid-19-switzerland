@@ -92,7 +92,7 @@ sir_age_model <- function(time, state, parameters) {
 #nombre de fully vaccinated people by age groupe : https://www.covid19.admin.ch/en/vaccination/persons?ageGroupClass=vaccStrategy&demoSum=total&vaccPersonsRel=abs
 #0-15 ; 16-64 ; >65
 
-#purcentage of population for each age group obtained with https://www.bfs.admin.ch/bfs/fr/home/statistiques/population/effectif-evolution/age-etat-civil-nationalite.assetdetail.18264546.html
+#purcentage of population for each agrse group obtained with https://www.bfs.admin.ch/bfs/fr/home/statistiques/population/effectif-evolution/age-etat-civil-nationalite.assetdetail.18264546.html
 #(moyenne entre sexes)
 #pas exactement la m�me tranche d'�ge (20-65 au lieu de 18-65 dans le mod�le, et 16-65 dans les stats vaccination)
 #pop suisse totale: 8670300 (https://www.bfs.admin.ch/bfs/fr/home/statistiques/population.html)
