@@ -9,6 +9,8 @@ import numpy as np
 from copy import deepcopy
 from scipy.integrate import odeint
 from .equations import age_groups_SIR_derivative, state_as_vector, state_as_matrix
+from .force_of_infection import compute_aggregated_new_infections
+from .contacts import load_population_contacts_csv
 
 
 class AgeGroupsSIR:
@@ -31,8 +33,6 @@ class AgeGroupsSIR:
                            age group. For example, [[189, 1, 0], [0, 0, 0], [9, 0, 1]] means that initially,
                            1 person below 19 y.o. is infected, and that a single person over 65
                            has already recovered. The total population is 200.
-        - 'lambdas': array/list of length (number of age groups,) giving the force of infection for
-                     each age group.
         - 'gammas': array/list of length (number of age groups,) giving the recovery rates for each age
                     group.
         """
@@ -49,6 +49,18 @@ class AgeGroupsSIR:
         for group in range(self.n_age_groups):
             self.initial_state_[group] = self.params_['initial_state'][group]
 
+        self.sample_ids, self.contact_matrices_ = None, None
+        self.new_infections_ = None
+
+    def load_force_of_infection(self, contact_matrices_csv):
+        """
+        Computes the age-wise force of infection.
+        :param contact_matrices_csv: path to the CSV file containing the
+            contact matrices.
+        """
+        self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(contact_matrices_csv)
+        self.new_infections_ = compute_aggregated_new_infections(self.contact_matrices_, 0.01)
+
     def solve(self, max_t):
         """
         Solves the ODE system with an increment of 1 day from t=0 to max_t (excluded).
@@ -57,7 +69,7 @@ class AgeGroupsSIR:
             system at each time.
         """
         # Builds the equation function from the parameters
-        eq_func = age_groups_SIR_derivative(self.params_['lambdas'], self.params_['gammas'])
+        eq_func = age_groups_SIR_derivative(self.new_infections_, self.params_['gammas'])
         # Converts the initial state to a vector to match the solver's signature
         initial_state = state_as_vector(self.initial_state_)
         # Solves the ODE numerically

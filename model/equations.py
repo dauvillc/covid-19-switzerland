@@ -50,9 +50,10 @@ def age_groups_SIR_derivative(lambdas, gammas):
         # values
         state = state_as_matrix(state)
         S, I, R = state[:, 0], state[:, 1], state[:, 2]
+        N = S + I + R
 
         # Implements the ODE system
-        dS = - lambdas * S
+        dS = - lambdas.T @ I * S / N
         dR = gammas * I
         dI = dS - dR
 

@@ -13,10 +13,11 @@ def main():
     # Age groups
     age_groups = [19, 64]
 
-    # Force of infection for each age group
-    lambdas = np.array([0.5, 0.5, 0.5])
     # Recovery rate for each age group
     gammas = np.array([0.2, 0.2, 0.2])
+
+    # Contact matrices CSV file
+    contacts_csv = "data/contact_counts.csv"
 
     # Initial state
     total_pop = 1000000
@@ -29,8 +30,8 @@ def main():
     model = AgeGroupsSIR({'age_groups': age_groups,
                           'N': total_pop,
                           'initial_state': state0,
-                          'lambdas': lambdas,
                           'gammas': gammas})
+    model.load_force_of_infection(contacts_csv)
 
     # ============= SOLVING ================= #
     solved_states = model.solve(30)
