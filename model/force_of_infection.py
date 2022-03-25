@@ -17,5 +17,5 @@ def compute_aggregated_new_infections(contact_matrices, beta):
     :param beta: float, probability of transmission.
     :return: the aggregated dI as an array of shape (n_age_groups).
     """
-    return np.sum(contact_matrices, axis=(0, 2)) * beta
+    return np.mean(contact_matrices, axis=(0, 2)) * beta
 

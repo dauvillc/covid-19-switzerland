@@ -5,6 +5,7 @@ Clément Dauvilliers - EPFL TRANSP-OR lab semester project
 Tests the proper functioning of the AgeGroupSIR class.
 """
 import numpy as np
+import matplotlib.pyplot as plt
 from model import AgeGroupsSIR
 
 
@@ -31,10 +32,11 @@ def main():
                           'N': total_pop,
                           'initial_state': state0,
                           'gammas': gammas})
-    model.load_force_of_infection(contacts_csv)
+    model.load_force_of_infection(contacts_csv, 0.2)
 
     # ============= SOLVING ================= #
-    solved_states = model.solve(30)
+    fig, ax = model.plot_infections(30)
+    fig.show()
     return 0
 
 

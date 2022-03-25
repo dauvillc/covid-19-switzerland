@@ -37,13 +37,13 @@ def age_groups_SIR_derivative(lambdas, gammas):
         :return: the derivative of the state at the given time step.
     """
 
-    def derivative(state, time):
+    def derivative(time, state):
         """
         Function f so that dY/dt = f(Y) is the ODE system of the SIR model
         split into age groups.
+        :param time: time step (in day).
         :param state: vector of length (number of age groups * 3). Should be an age-group SIR matrix
             vectorized via state_as_matrix.
-        :param time: time step (in day).
         :return: the value of dS/dt on day t as a vector of same length as state.
         """
         # We convert the state back into matrix form to retrieve the SIR
@@ -55,10 +55,10 @@ def age_groups_SIR_derivative(lambdas, gammas):
         # Implements the ODE system
         dS = - lambdas.T @ I * S / N
         dR = gammas * I
-        dI = dS - dR
+        dI = - dS - dR
 
         # Transforms the state back into a vector for coherence with the
         # usual python ODE solvers (such as scipy.integrate.odeint).
-        return state_as_vector(np.hstack([dS, dI, dR]))
+        return state_as_vector(np.stack([dS, dI, dR], axis=1))
 
     return derivative

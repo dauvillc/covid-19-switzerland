@@ -6,8 +6,9 @@ Defines the AgeGroupsSIR class.
 """
 
 import numpy as np
+import matplotlib.pyplot as plt
 from copy import deepcopy
-from scipy.integrate import odeint
+from scipy.integrate import solve_ivp
 from .equations import age_groups_SIR_derivative, state_as_vector, state_as_matrix
 from .force_of_infection import compute_aggregated_new_infections
 from .contacts import load_population_contacts_csv
@@ -51,15 +52,18 @@ class AgeGroupsSIR:
 
         self.sample_ids, self.contact_matrices_ = None, None
         self.new_infections_ = None
+        self.solved_states_ = None
 
-    def load_force_of_infection(self, contact_matrices_csv):
+    def load_force_of_infection(self, contact_matrices_csv, betas):
         """
         Computes the age-wise force of infection.
         :param contact_matrices_csv: path to the CSV file containing the
             contact matrices.
+        :param betas: vector of length n_age_groups, giving the probability of
+        infection for each age group.
         """
         self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(contact_matrices_csv)
-        self.new_infections_ = compute_aggregated_new_infections(self.contact_matrices_, 0.01)
+        self.new_infections_ = compute_aggregated_new_infections(self.contact_matrices_, betas)
 
     def solve(self, max_t):
         """
@@ -73,8 +77,37 @@ class AgeGroupsSIR:
         # Converts the initial state to a vector to match the solver's signature
         initial_state = state_as_vector(self.initial_state_)
         # Solves the ODE numerically
-        solved_states = odeint(eq_func, initial_state, np.arange(max_t))
+        solution = solve_ivp(eq_func,
+                             y0=state_as_vector(initial_state),
+                             t_span=(0, max_t),
+                             t_eval=np.arange(0, max_t),
+                             vectorized=True)
+        solved_states = solution.y.T
         # Reshape the states back to matrices and return them
-        return solved_states.reshape((solved_states.shape[0], self.n_age_groups, 3))
+        self.solved_states_ = solved_states.reshape((solved_states.shape[0], 3, 3))
+        return np.copy(self.solved_states_)
 
+    def plot_infections(self, max_t, ax=None):
+        """
+        Solves the model and plots the age-wise incidence curve.
+        :param max_t: last day of the simulation.
+        :param ax: matplotlib ax to use for plotting
+        """
+        # If no ax was provided, create the figure
+        if ax is None:
+            fig, ax = plt.subplots(nrows=1, ncols=1)
+        # If the model hasn't been solved yet, solve it now
+        if self.solved_states_ is None:
+            self.solve(max_t)
 
+        infection_states = self.solved_states_[:, :, 1]
+        days = np.arange(max_t) + 1
+        ax.plot(days, infection_states[:, 0])
+        ax.plot(days, infection_states[:, 1])
+        ax.plot(days, infection_states[:, 2])
+
+        age_intervals = self.params_['age_groups']
+        ax.legend([f'$\leq$ {age_intervals[0]} y.o.'] +\
+                  [f"{a}-{b}" for a, b in zip(age_intervals, age_intervals[1:])] +\
+                  [f'$>$ {age_intervals[-1]}'])
+        return fig, ax
