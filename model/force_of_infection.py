@@ -14,8 +14,12 @@ def compute_aggregated_new_infections(contact_matrices, beta):
     infectious individual contaminates per unit of time).
     :param contact_matrices: 3D int array of shape
         (sample_size, n_age_groups, n_activity_types).
-    :param beta: float, probability of transmission.
+    :param beta: vector of length n_activity_types giving the probability
+        of transmission for each activity type.
     :return: the aggregated dI as an array of shape (n_age_groups).
     """
-    return np.mean(contact_matrices, axis=(0, 2)) * beta
+    # Average number of contacts per type of activity
+    real_contacts = contact_matrices * beta
+
+    return np.mean(real_contacts, axis=(0, 2))
 

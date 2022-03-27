@@ -15,7 +15,10 @@ def load_population_contacts_csv(csv_path):
     :param csv_path: path to the CSV file containing the contacts for each
         individual. Each row should indicate the person ID, as well as the number
         of daily contacts of that person for each activity type and each age group.
-    :return: (ids, matrices) where:
+    :return: (activity_types, ids, matrices) where:
+        - activity_types is a dict {type: index} where type is a type of activity (eg
+            'leisure' and index is the index of that type in the contact matrices'
+            columns.
         - ids is an array giving the ID of every person in the dataset;
         - matrices is a 3D array of shape (n_people, n_age_groups, n_activity_types)
           such that matrices[i] is the contact matrix for person ids[i];
@@ -29,9 +32,16 @@ def load_population_contacts_csv(csv_path):
 
     # Computes the number of age groups and act. types from the columns' names
     # the column names are supposed to be 'activitytype_agegroup'
-    n_age_groups = len(np.unique([col_name.split('_')[1] for col_name in contacts_df.columns]))
-    n_activity_types = contacts_df.columns.shape[0] // n_age_groups
+    split_column_names = [col_name.split('_') for col_name in contacts_df.columns]
+    activity_types = np.unique([act_type for act_type, _ in split_column_names])
+    age_groups = np.unique([age_group for _, age_group in split_column_names])
+
+    # Stores the index of each activity type in the contact matrices' columns
+    act_types_indices = {type_: idx for idx, type_ in enumerate(activity_types)}
+
     # Reshapes into the expected 3D array
+    n_age_groups = len(age_groups)
+    n_activity_types = len(activity_types)
     matrices = matrices.reshape((matrices.shape[0], n_age_groups, n_activity_types), order='F')
 
-    return ids, matrices
+    return act_types_indices, ids, matrices

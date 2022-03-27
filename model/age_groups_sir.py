@@ -42,11 +42,11 @@ class AgeGroupsSIR:
         # Save the number of age groups to access it easily later
         self.n_age_groups = len(self.params_['age_groups']) + 1
         age_intervals = self.params_['age_groups']
-        self.age_groups_names = [f'under {age_intervals[0]}'] + \
+        self.age_groups_names = [f'under {age_intervals[0] + 1}'] + \
                                 [f"{a}-{b}" for a, b in zip(age_intervals, age_intervals[1:])] + \
                                 [f'over {age_intervals[-1]}']
 
-        self.sample_ids, self.contact_matrices_ = None, None
+        self.act_types_indices, self.sample_ids, self.contact_matrices_ = None, None, None
         self.new_infections_ = None
         self.solved_states_ = {}
         self.timepoints_ = []
@@ -57,11 +57,20 @@ class AgeGroupsSIR:
         Computes the age-wise force of infection.
         :param contact_matrices_csv: path to the CSV file containing the
             contact matrices.
-        :param betas: vector of length n_age_groups, giving the probability of
-        infection for each age group.
+        :param betas: dictionnary {activity type: p} where p is the probability
+            of transmission associated with the activity type.
         """
-        self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(contact_matrices_csv)
-        self.new_infections_ = compute_aggregated_new_infections(self.contact_matrices_, betas)
+        self.act_types_indices, self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(
+            contact_matrices_csv)
+
+        # Compiles the probabilities of transmission into an array, and makes sure
+        # that the order corresponds to that of the contact matrices
+        betas_array = np.empty((len(self.act_types_indices)), dtype=np.float64)
+        for act_type, index in self.act_types_indices.items():
+            betas_array[index] = betas[act_type]
+
+        self.new_infections_ = compute_aggregated_new_infections(self.contact_matrices_,
+                                                                 betas_array)
 
     def solve(self, max_t, initial_state_func, day_eval_freq=1, runs=1):
         """
@@ -113,7 +122,7 @@ class AgeGroupsSIR:
     def plot_infections(self, ax=None):
         """
         For an already solved model, plots the age-wise incidence curve.
-        :param ax: matplotlib ax to use for plotting
+        :param ax: optional matplotlib ax to use for plotting
         """
         if self.results_ is None:
             raise ValueError("Please call model.solve() before plotting")
@@ -127,12 +136,21 @@ class AgeGroupsSIR:
         # if several model runs were performed
         results_long = self.results_.melt(id_vars=['day'],
                                           value_vars=self.results_.columns[:-2],
-                                          var_name="age_group",
+                                          var_name="age group",
                                           value_name="infectious")
         # Plots the number of infectious per day per age group, and shows
         # the confidence interval
-        sns.lineplot(data=results_long, x="day", y="infectious", hue="age_group", ax=ax)
+        sns.lineplot(data=results_long, x="day", y="infectious", hue="age group", ax=ax)
 
         ax.set_ylabel("Infectious individuals")
         ax.set_xlabel("Days")
-        return fig, ax
+        return ax
+
+    def plot_secondary_infections(self, ax=None):
+        """
+        Makes a heatmap of the average number of secondary infections
+        per age group and activity type.
+        :param ax: optional matplotlib Axes object to use for plotting;
+        """
+        # TODO
+        pass
