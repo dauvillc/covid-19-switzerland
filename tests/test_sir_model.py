@@ -53,15 +53,8 @@ def main():
 
     # ============= SOLVING ================= #
     model.solve(60, initial_state_func, day_eval_freq=4, runs=10)
-
-    fig = plt.figure(figsize=(11, 8))
-    fig.suptitle("Example SIR model run")
-    gs = gridspec.GridSpec(nrows=2, ncols=2, height_ratios=[3, 1], width_ratios=[2, 1])
-    model.plot_infections(ax=plt.subplot(gs[0, 0]))
-    model.plot_betas(ax=plt.subplot(gs[1, 0]))
-    model.plot_secondary_infections(ax=plt.subplot(gs[:, 1]))
+    fig = model.dashboard()
     fig.savefig("figures/example_run.png")
-    fig.tight_layout()
     fig.show()
     return 0
 

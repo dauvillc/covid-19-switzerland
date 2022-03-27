@@ -11,6 +11,7 @@ import seaborn as sns
 import pandas as pd
 from copy import deepcopy
 from scipy.integrate import solve_ivp
+from matplotlib import gridspec
 from .equations import age_groups_SIR_derivative, state_as_vector, state_as_matrix
 from .force_of_infection import compute_aggregated_new_infections
 from .contacts import load_population_contacts_csv
@@ -193,3 +194,18 @@ class AgeGroupsSIR:
         ax.set_xlabel("Age group")
         ax.set_ylabel("Average daily secondary infections")
         return ax
+
+    def dashboard(self):
+        """
+        Creates a dashboard plotting various information that summarizes the model
+        and its results.
+        :return: a matplotlib Figure object.
+        """
+        fig = plt.figure(figsize=(11, 8))
+        fig.suptitle("Example SIR model run")
+        gs = gridspec.GridSpec(nrows=2, ncols=2, height_ratios=[3, 1], width_ratios=[2, 1])
+        self.plot_infections(ax=plt.subplot(gs[0, 0]))
+        self.plot_betas(ax=plt.subplot(gs[1, 0]))
+        self.plot_secondary_infections(ax=plt.subplot(gs[:, 1]))
+        fig.tight_layout()
+        return fig
