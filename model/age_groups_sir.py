@@ -43,11 +43,11 @@ class AgeGroupsSIR:
         self.n_age_groups = len(self.params_['age_groups']) + 1
         age_intervals = self.params_['age_groups']
         self.age_groups_names = [f'under {age_intervals[0] + 1}'] + \
-                                [f"{a}-{b}" for a, b in zip(age_intervals, age_intervals[1:])] + \
+                                [f"{a + 1}-{b}" for a, b in zip(age_intervals, age_intervals[1:])] + \
                                 [f'over {age_intervals[-1]}']
 
         self.act_types_indices, self.sample_ids, self.contact_matrices_ = None, None, None
-        self.new_infections_ = None
+        self.new_infections_, self.betas_ = None, None
         self.solved_states_ = {}
         self.timepoints_ = []
         self.results_ = None
@@ -62,6 +62,9 @@ class AgeGroupsSIR:
         """
         self.act_types_indices, self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(
             contact_matrices_csv)
+
+        # Saves the probabilities of transmission to plot them later
+        self.betas_ = pd.Series(betas)
 
         # Compiles the probabilities of transmission into an array, and makes sure
         # that the order corresponds to that of the contact matrices
@@ -154,3 +157,39 @@ class AgeGroupsSIR:
         """
         # TODO
         pass
+
+    def plot_betas(self, ax=None):
+        """
+        Plots the probabilities of transmission.
+        :param ax: optional matplotlib axes to use;
+        """
+        if ax is None:
+            fig, ax = plt.subplots(nrows=1, ncols=1)
+        # Bar plot of the probabilities of transmission
+        sns.barplot(x=self.betas_.index, y=self.betas_.values, ax=ax)
+        for idx, proba in enumerate(self.betas_):
+            ax.text(idx, proba, str(proba), horizontalalignment="center")
+
+        ax.set_xlabel("Activity type")
+        ax.set_ylabel("Prob. of transmission", labelpad=30)
+        ax.set_ylim([0, 1])
+        return ax
+
+    def plot_secondary_infections(self, ax=None):
+        """
+        Plots the average secondary infections per age group.
+        :param ax: optional matplotlib to use;
+        """
+        if ax is None:
+            fig, ax = plt.subplots(nrows=1, ncols=1)
+        # Bar plot of the secondary infections
+        sec_inf = pd.Series({age_group: value
+                             for age_group, value in
+                             zip(self.age_groups_names, self.new_infections_)})
+        sns.barplot(x=sec_inf.index, y=sec_inf.values, ax=ax)
+        for idx, value in enumerate(sec_inf):
+            ax.text(idx, value, f"{value: 1.2f}", horizontalalignment="center")
+
+        ax.set_xlabel("Age group")
+        ax.set_ylabel("Average daily secondary infections")
+        return ax
