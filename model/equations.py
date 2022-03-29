@@ -53,7 +53,7 @@ def age_groups_SIR_derivative(lambdas, gammas):
         N = np.sum(state)
 
         # Implements the ODE system
-        dS = - lambdas.T * I * (S / N)
+        dS = - lambdas.T * (S / N) * I.sum()
         dR = gammas * I
         dI = - dS - dR
 

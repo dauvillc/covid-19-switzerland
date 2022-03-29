@@ -32,12 +32,12 @@ def main():
 
     # activity-dependent probabilities of transmission
     betas = {
-        "work": 0.5,
-        "education": 0.5,
-        "leisure": 0.5,
-        "service": 0.5,
-        "home": 0.5,
-        "shop": 0.5
+        "work": 0.03,
+        "education": 0.001,
+        "leisure": 0.01,
+        "service": 0.05,
+        "home": 0.05,
+        "shop": 0.03
     }
 
     def initial_state_func():

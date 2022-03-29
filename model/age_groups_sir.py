@@ -12,8 +12,8 @@ import pandas as pd
 from copy import deepcopy
 from scipy.integrate import solve_ivp
 from matplotlib import gridspec
-from .equations import age_groups_SIR_derivative, state_as_vector, state_as_matrix
-from .force_of_infection import compute_aggregated_new_infections
+from .equations import age_groups_SIR_derivative, state_as_vector
+from .force_of_infection import compute_aggregated_new_infections, average_contact_matrix
 from .contacts import load_population_contacts_csv
 
 sns.set_theme()
@@ -64,14 +64,15 @@ class AgeGroupsSIR:
         self.act_types_indices, self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(
             contact_matrices_csv)
 
-        # Saves the probabilities of transmission to plot them later
-        self.betas_ = pd.Series(betas)
-
         # Compiles the probabilities of transmission into an array, and makes sure
         # that the order corresponds to that of the contact matrices
         betas_array = np.empty((len(self.act_types_indices)), dtype=np.float64)
         for act_type, index in self.act_types_indices.items():
             betas_array[index] = betas[act_type]
+
+        # Saves the probabilities of transmission to plot them later
+        # This dict is in the same order as the contact matrices' columns
+        self.betas_ = pd.Series(data=betas_array, index=list(self.act_types_indices.keys()))
 
         self.new_infections_ = compute_aggregated_new_infections(self.contact_matrices_,
                                                                  betas_array)
@@ -148,16 +149,8 @@ class AgeGroupsSIR:
 
         ax.set_ylabel("Infectious individuals")
         ax.set_xlabel("Days")
+        ax.set_title("Infection trajectory")
         return ax
-
-    def plot_secondary_infections(self, ax=None):
-        """
-        Makes a heatmap of the average number of secondary infections
-        per age group and activity type.
-        :param ax: optional matplotlib Axes object to use for plotting;
-        """
-        # TODO
-        pass
 
     def plot_betas(self, ax=None):
         """
@@ -172,27 +165,32 @@ class AgeGroupsSIR:
             ax.text(idx, proba, str(proba), horizontalalignment="center")
 
         ax.set_xlabel("Activity type")
-        ax.set_ylabel("Prob. of transmission", labelpad=30)
-        ax.set_ylim([0, 1])
+        ax.set_ylabel("Prob. of transmission")
+        ax.set_ylim([0, self.betas_.values.max() * 1.2])
+        ax.set_title('Activity-wise probabilities of transmission')
         return ax
 
     def plot_secondary_infections(self, ax=None):
         """
-        Plots the average secondary infections per age group.
+        Plots the average secondary infections per age group and decomposes
+        it according to the weight of each activity type.
         :param ax: optional matplotlib to use;
         """
         if ax is None:
             fig, ax = plt.subplots(nrows=1, ncols=1)
         # Bar plot of the secondary infections
-        sec_inf = pd.Series({age_group: value
-                             for age_group, value in
-                             zip(self.age_groups_names, self.new_infections_)})
-        sns.barplot(x=sec_inf.index, y=sec_inf.values, ax=ax)
-        for idx, value in enumerate(sec_inf):
+        avg_contact_matrix = average_contact_matrix(self.contact_matrices_, self.betas_.values)
+        sec_inf_weights = pd.DataFrame(data={act_type: avg_contact_matrix[:, i]
+                                             for i, act_type in enumerate(self.betas_.keys())},
+                                       index=self.age_groups_names)
+        sec_inf_weights.plot.bar(stacked=True, ax=ax)
+
+        for idx, value in enumerate(self.new_infections_):
             ax.text(idx, value, f"{value: 1.2f}", horizontalalignment="center")
 
         ax.set_xlabel("Age group")
         ax.set_ylabel("Average daily secondary infections")
+        ax.set_title("Activity weights in new infections rates")
         return ax
 
     def dashboard(self):
@@ -202,8 +200,8 @@ class AgeGroupsSIR:
         :return: a matplotlib Figure object.
         """
         fig = plt.figure(figsize=(11, 8))
-        fig.suptitle("Example SIR model run")
-        gs = gridspec.GridSpec(nrows=2, ncols=2, height_ratios=[3, 1], width_ratios=[2, 1])
+        fig.suptitle("SIR Model Dashboard")
+        gs = gridspec.GridSpec(nrows=2, ncols=2, height_ratios=[3, 1], width_ratios=[3, 2])
         self.plot_infections(ax=plt.subplot(gs[0, 0]))
         self.plot_betas(ax=plt.subplot(gs[1, 0]))
         self.plot_secondary_infections(ax=plt.subplot(gs[:, 1]))

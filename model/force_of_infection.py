@@ -18,8 +18,24 @@ def compute_aggregated_new_infections(contact_matrices, beta):
         of transmission for each activity type.
     :return: the aggregated dI as an array of shape (n_age_groups).
     """
-    # Average number of contacts per type of activity
-    real_contacts = contact_matrices * beta
+    # Sum of the average contact matrix
+    avg_contact_matrix = average_contact_matrix(contact_matrices, beta)
+    return np.sum(avg_contact_matrix, axis=1)
 
-    return np.mean(real_contacts, axis=(0, 2))
+
+def average_contact_matrix(contact_matrices, beta):
+    """
+    From the contact matrices and the probabilities of transmission,
+    computes the average contact matrix.
+    :param contact_matrices: 3D int array of shape
+        (sample_size, n_age_groups, n_activity_types)
+    :param beta: vector of length n_activity_types giving the
+        probability of transmission for contact occurring in each
+        type of activity.
+    :return: the average contact matrix as an array of shape
+        (n_age_groups, n_activity_types).
+    """
+    avg_contacts = np.mean(contact_matrices, axis=0)
+    # Ponders the average contacts with the probs. of transmission
+    return avg_contacts * beta
 
