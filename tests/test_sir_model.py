@@ -33,7 +33,7 @@ def main():
     # activity-dependent probabilities of transmission
     betas = {
         "work": 0.03,
-        "education": 0.001,
+        "education": 0.1,
         "leisure": 0.01,
         "service": 0.05,
         "home": 0.05,
