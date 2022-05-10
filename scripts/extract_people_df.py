@@ -13,6 +13,8 @@ import os
 from time import time
 
 # PARAMETERS
+# Whether to process the attributes of people
+_PROCESS_PERSON_ATTRIBUTES_ = False
 # Number of people to process between two saves into the csv file
 # A lower number implies saving more often and thus a slight loss
 # of time (the saving time is still small compared to the processing
@@ -31,7 +33,7 @@ _FIELDS_ATTRIBUTES_ = ['id', 'age', 'bikeAvailability', 'carAvail', 'employed',
                        'isCarPassenger', 'municipalityType', 'ptHasGA', 'ptHasHalbtax',
                        'ptHasStrecke', 'ptHasVerbund', 'sex', 'spRegion']
 
-_FIELDS_ACTIVITIES_ = ['id', 'type', 'facility', 'link', 'x', 'y']
+_FIELDS_ACTIVITIES_ = ['id', 'type', 'facility', 'link', 'x', 'y', 'start_time', 'end_time']
 
 
 def refresh_xml_parser(current_parser=None):
@@ -127,20 +129,21 @@ def main():
                     processed_people += 1
 
                     # ==== PROCESSING ATTRIBUTES ========== #
-                    # The children elements of a <person> are <attributes> and <plan>
-                    # The <plan> concerns the activities, which we ignore here
-                    attributes = list(elem[0])
-                    # att.text contains the value of the attribute
-                    # such as "45" for age, or "true" for employed.
-                    attributes = {att.attrib['name']: att.text for att in attributes}
-                    attributes['id'] = person_id
-                    soc_eco_attrib_rows.append(attributes)
+                    if _PROCESS_PERSON_ATTRIBUTES_:
+                        # The children elements of a <person> are <attributes> and <plan>
+                        # The <plan> concerns the activities, which we ignore here
+                        attributes = list(elem[0])
+                        # att.text contains the value of the attribute
+                        # such as "45" for age, or "true" for employed.
+                        attributes = {att.attrib['name']: att.text for att in attributes}
+                        attributes['id'] = person_id
+                        soc_eco_attrib_rows.append(attributes)
 
                     # ==== PROCESSING ACTIVITIES =========== #
                     # elem[1] is the <plan> element. Its children can
                     # be <leg> or <activity>
                     activities = [xmlelem for xmlelem in elem[1] if xmlelem.tag[0] == 'a']
-                    # Compiles the attributes (type, facilityi, x, y, ...) of all activities
+                    # Compiles the attributes (type, facility, x, y, ...) of all activities
                     # of the current person.
                     person_activities = [
                         {name: value for name, value in activity.attrib.items()}
@@ -159,10 +162,14 @@ def main():
                     # After a fix number of individuals processed, saves their attributes
                     # and activities
                     if processed_people % _SAVE_EVERY_K_PEOPLE_ == 0:
-                        print(f'Saving attributes to {_SAVE_FILE_ATTRIBUTES_}, last line processed={line_number}')
-                        print(f'Saving activities to {_SAVE_FILE_ACTIVITIES_}, last line processed={line_number}')
-                        attributes_writer.writerows(soc_eco_attrib_rows)
+                        # Write the attributes
+                        if _PROCESS_PERSON_ATTRIBUTES_:
+                            print(f'Saving attributes to {_SAVE_FILE_ATTRIBUTES_}, last line processed={line_number}')
+                            attributes_writer.writerows(soc_eco_attrib_rows)
+                        # Write the activities
                         activities_writer.writerows(last_activities)
+                        print(f'Saving activities to {_SAVE_FILE_ACTIVITIES_}, last line processed={line_number}')
+
                         # Frees all memory used so far to store attributes and activities
                         del soc_eco_attrib_rows
                         del last_activities
