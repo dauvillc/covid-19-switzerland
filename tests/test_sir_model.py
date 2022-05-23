@@ -52,7 +52,8 @@ def main():
 
     # ============= SOLVING ================= #
     model.solve(60, initial_state_func, day_eval_freq=4, runs=10)
-    fig = model.dashboard()
+    ## fig = model.dashboard()
+    fig = model.plot_fit(np.arange(60 * 3).reshape((3, 60)))
     fig.savefig("figures/example_run.png")
     fig.show()
     return 0

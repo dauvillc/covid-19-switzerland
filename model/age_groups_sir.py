@@ -145,7 +145,7 @@ class AgeGroupsSIR:
                                           value_name="infectious")
         # Plots the number of infectious per day per age group, and shows
         # the confidence interval
-        sns.lineplot(data=results_long, x="day", y="infectious", hue="age group", ax=ax)
+        sns.lineplot(data=results_long, x="day", y="infectious", hue="age group", style="age group", ax=ax)
 
         ax.set_ylabel("Infectious individuals")
         ax.set_xlabel("Days")
@@ -205,5 +205,58 @@ class AgeGroupsSIR:
         self.plot_infections(ax=plt.subplot(gs[0, 0]))
         self.plot_betas(ax=plt.subplot(gs[1, 0]))
         self.plot_secondary_infections(ax=plt.subplot(gs[:, 1]))
+        fig.tight_layout()
+        return fig
+
+    def plot_fit(self, real_data):
+        """
+        Plots together the real and predicted trajectories.
+        :param real_data: ndarray of shape (n_age_groups, duration_days) giving the number
+            of infections for each day and each age group.
+        """
+        if self.results_ is None:
+            raise ValueError("Please call model.solve() before plotting")
+
+        fig, axes = plt.subplots(nrows=self.n_age_groups, ncols=1, figsize=(10, 3 * self.n_age_groups))
+        fig.suptitle('Predicted vs. real infections')
+
+        # Converts the model results into long format
+        # columns become: index day age_group infectious
+        # multiple values may appear for the same age group and day
+        # if several model runs were performed
+        results_long = self.results_.melt(id_vars=['day'],
+                                          value_vars=self.results_.columns[:-2],
+                                          var_name="age group",
+                                          value_name="infectious")
+
+        # For each age group, plots the predicted and real trajectory
+        for age_group_index, age_group in enumerate(self.age_groups_names):
+            ax = axes[age_group_index]
+            # Selects the results for the current age group
+            age_group_results = results_long[results_long['age group'] == age_group]
+            age_group_results = age_group_results.drop('age group', axis=1)
+            # Watchout: the real data is given once for each day. However the simulation has
+            # several timesteps per day. To make them coherent, we'll repeat the values in the real data
+            # as many times for each day as the simulation daily frequency.
+            real_traj = real_data[age_group_index]
+            real_traj = np.repeat(real_traj, self.timepoints_.shape[0] / real_traj.shape[0])
+            # Adds the real traj to the dataframe so that seaborn plots both trajectories automatically
+            # and adjusts the style and legend.
+            real_traj = pd.DataFrame({"day": self.timepoints_, "infectious": real_traj})
+            # To do that, we need a new column which indicates whether the row is part of the real or
+            # predicted trajectory
+            age_group_results.loc[:, 'Trajectory'] = 'Predicted'
+            real_traj.loc[:, 'Trajectory'] = 'Real'
+            # We can now concatenate the dataframes:
+            age_group_results = pd.concat([age_group_results, real_traj]).reset_index()
+
+            # Plots the number of infectious per day per age group, and shows
+            # the confidence interval
+            sns.lineplot(data=age_group_results, x="day", y="infectious", hue="Trajectory", style="Trajectory", ax=ax)
+
+            ax.set_ylabel("Cases")
+            ax.set_xlabel("Days")
+            ax.set_title(f"Age group {age_group}")
+
         fig.tight_layout()
         return fig
