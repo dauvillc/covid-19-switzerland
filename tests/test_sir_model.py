@@ -47,7 +47,6 @@ def main():
     # ============= MODEL =================== #
     model = AgeGroupsSIR({'age_groups': age_groups,
                           'N': total_pop,
-                          'initial_state': initial_state_func,
                           'gammas': gammas})
     model.load_force_of_infection(contacts_csv, betas)
 
