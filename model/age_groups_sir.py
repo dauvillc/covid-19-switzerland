@@ -51,7 +51,10 @@ class AgeGroupsSIR:
         self.new_infections_, self.betas_ = None, None
         self.solved_states_ = {}
         self.timepoints_ = []
+        # Results of the equations system solver
         self.results_ = None
+        # Number of new cases by the end of each day
+        self.new_cases_ = None
 
     def load_force_of_infection(self, contact_matrices_csv, betas):
         """
@@ -63,17 +66,26 @@ class AgeGroupsSIR:
         """
         self.act_types_indices, self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(
             contact_matrices_csv)
+        self.set_betas(betas)
 
+    def set_betas(self, values):
+        """
+        Sets the probabilities of transmission.
+        :param values: dict {activity type: proba, ...}.
+        """
         # Compiles the probabilities of transmission into an array, and makes sure
         # that the order corresponds to that of the contact matrices
         betas_array = np.empty((len(self.act_types_indices)), dtype=np.float64)
         for act_type, index in self.act_types_indices.items():
-            betas_array[index] = betas[act_type]
+            betas_array[index] = values[act_type]
 
         # Saves the probabilities of transmission to plot them later
         # This dict is in the same order as the contact matrices' columns
         self.betas_ = pd.Series(data=betas_array, index=list(self.act_types_indices.keys()))
 
+        # (Re)computes the new infections based on the probabilities of transmission
+        if self.contact_matrices_ is None:
+            raise ValueError("Please call load_force_of_infection() before set_betas()")
         self.new_infections_ = compute_aggregated_new_infections(self.contact_matrices_,
                                                                  betas_array)
 
@@ -94,7 +106,13 @@ class AgeGroupsSIR:
         """
         # Builds the equation function from the parameters
         eq_func = age_groups_SIR_derivative(self.new_infections_, self.params_['gammas'])
-        self.timepoints_ = np.linspace(0, max_t, max_t * day_eval_freq)
+        # Constructs evenly spaced timepoints to obtain
+        step = 1 / day_eval_freq
+        self.timepoints_ = np.arange(0, max_t + step, step)
+        # Indices of timepoints that correspond to exact days
+        self.day_indices_ = np.array([i for i in range(len(self.timepoints_))
+                                      if i % day_eval_freq == 0])
+        self.days_ = self.timepoints_[self.day_indices_]
 
         results = []
         for run in range(runs):
@@ -122,7 +140,36 @@ class AgeGroupsSIR:
 
         # Assembles the results of all runs into a single dataframe
         self.results_ = pd.concat(results)
+
+        # Computes the NEW cases daily
+        # We'll do it run by run, then concatenate all runs together
+        runs_new_cases = []
+        for run in range(runs):
+            # Number of susceptible over time in this run
+            susceptible = self.solved_states_[run][:, :, 0]
+            # Filters to get only the susceptible at the END of each day, since
+            # the equations are solved multiple times per day
+            susceptible = susceptible[self.day_indices_]
+            # New cases = Number of Susceptible on previous day - Number of susceptible
+            new_cases = pd.DataFrame(data=-np.diff(susceptible, axis=0),
+                                     index=self.days_[1:],
+                                     columns=self.age_groups_names)
+            new_cases['run'] = run
+            new_cases['day'] = self.days_[1:]
+            runs_new_cases.append(new_cases)
+        self.new_cases_ = pd.concat(runs_new_cases)
+
         return np.copy(self.solved_states_)
+
+    def calibrate(self, real_data):
+        """
+        Performs a grid search over the probabilities of transmission to find
+        the values that best fit the real trajectory of new infections.
+        :param real_data: dataframe/array of shape (number of age groups, simulation duration) giving
+            the target trajectory for each age group.
+        :return: a dict {activity type: probability} giving the optimal betas.
+        """
+        pass
 
     def plot_infections(self, ax=None):
         """
@@ -220,14 +267,14 @@ class AgeGroupsSIR:
         fig, axes = plt.subplots(nrows=self.n_age_groups, ncols=1, figsize=(10, 3 * self.n_age_groups))
         fig.suptitle('Predicted vs. real infections')
 
-        # Converts the model results into long format
+        # Converts the model's resuts (new cases trajectory) into long format
         # columns become: index day age_group infectious
         # multiple values may appear for the same age group and day
         # if several model runs were performed
-        results_long = self.results_.melt(id_vars=['day'],
-                                          value_vars=self.results_.columns[:-2],
-                                          var_name="age group",
-                                          value_name="infectious")
+        results_long = self.new_cases_.melt(id_vars='day',
+                                            value_vars=self.age_groups_names,
+                                            var_name="age group",
+                                            value_name="new infections")
 
         # For each age group, plots the predicted and real trajectory
         for age_group_index, age_group in enumerate(self.age_groups_names):
@@ -235,14 +282,11 @@ class AgeGroupsSIR:
             # Selects the results for the current age group
             age_group_results = results_long[results_long['age group'] == age_group]
             age_group_results = age_group_results.drop('age group', axis=1)
-            # Watchout: the real data is given once for each day. However the simulation has
-            # several timesteps per day. To make them coherent, we'll repeat the values in the real data
-            # as many times for each day as the simulation daily frequency.
             real_traj = real_data[age_group_index]
-            real_traj = np.repeat(real_traj, self.timepoints_.shape[0] / real_traj.shape[0])
+
             # Adds the real traj to the dataframe so that seaborn plots both trajectories automatically
             # and adjusts the style and legend.
-            real_traj = pd.DataFrame({"day": self.timepoints_, "infectious": real_traj})
+            real_traj = pd.DataFrame({"day": self.days_[1:], "new infections": real_traj})
             # To do that, we need a new column which indicates whether the row is part of the real or
             # predicted trajectory
             age_group_results.loc[:, 'Trajectory'] = 'Predicted'
@@ -252,7 +296,7 @@ class AgeGroupsSIR:
 
             # Plots the number of infectious per day per age group, and shows
             # the confidence interval
-            sns.lineplot(data=age_group_results, x="day", y="infectious", hue="Trajectory", style="Trajectory", ax=ax)
+            sns.lineplot(data=age_group_results, x="day", y="new infections", hue="Trajectory", style="Trajectory", ax=ax)
 
             ax.set_ylabel("Cases")
             ax.set_xlabel("Days")
