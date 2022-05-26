@@ -9,11 +9,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+from itertools import product
 from copy import deepcopy
 from scipy.integrate import solve_ivp
 from matplotlib import gridspec
+from tqdm.auto import tqdm
 from .equations import age_groups_SIR_derivative, state_as_vector
-from .force_of_infection import compute_aggregated_new_infections, average_contact_matrix
 from .contacts import load_population_contacts_csv
 
 sns.set_theme()
@@ -47,26 +48,30 @@ class AgeGroupsSIR:
                                 [f"{a + 1}-{b}" for a, b in zip(age_intervals, age_intervals[1:])] + \
                                 [f'over {age_intervals[-1]}']
 
+        # Attributes related to the computation of the new infections I*
         self.act_types_indices, self.sample_ids, self.contact_matrices_ = None, None, None
-        self.new_infections_, self.betas_ = None, None
+        self.avg_contact_matrix_, self.betas_, self.new_infections_ = None, None, None
+
+        # Attributes filled after the model has been run
         self.solved_states_ = {}
-        self.timepoints_ = []
+        # Timepoints (in days) of the simulation, and timestamps corresponding to exact days
+        # for example, [0.00, 0.25, 0.5, 0.75, 1] and [0.00, 1]
+        self.timepoints_, self.days_, self.day_indices_ = [], [], []
         # Results of the equations system solver
         self.results_ = None
         # Number of new cases by the end of each day
         self.new_cases_ = None
 
-    def load_force_of_infection(self, contact_matrices_csv, betas):
+    def load_contacts(self, contact_matrices_csv):
         """
-        Computes the age-wise force of infection.
+        Loads the individual contact matrices from a CSV file and
+        computes and saves their average.
         :param contact_matrices_csv: path to the CSV file containing the
             contact matrices.
-        :param betas: dictionnary {activity type: p} where p is the probability
-            of transmission associated with the activity type.
         """
         self.act_types_indices, self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(
             contact_matrices_csv)
-        self.set_betas(betas)
+        self.avg_contact_matrix_ = np.mean(self.contact_matrices_, axis=0)
 
     def set_betas(self, values):
         """
@@ -85,9 +90,13 @@ class AgeGroupsSIR:
 
         # (Re)computes the new infections based on the probabilities of transmission
         if self.contact_matrices_ is None:
-            raise ValueError("Please call load_force_of_infection() before set_betas()")
-        self.new_infections_ = compute_aggregated_new_infections(self.contact_matrices_,
-                                                                 betas_array)
+            raise ValueError("Please call load_contacts() before set_betas()")
+
+        # Computes the new infections vector I* from the average contact matrix and the
+        # probabilities of transmission.
+        # This vector gives for each age group the daily new infections per Infectious individual
+        # in the population.
+        self.new_infections_ = np.sum(self.avg_contact_matrix_ * betas_array, axis=1)
 
     def solve(self, max_t, initial_state_func, day_eval_freq=1, runs=1):
         """
@@ -159,17 +168,55 @@ class AgeGroupsSIR:
             runs_new_cases.append(new_cases)
         self.new_cases_ = pd.concat(runs_new_cases)
 
-        return np.copy(self.solved_states_)
+        return deepcopy(self.solved_states_)
 
-    def calibrate(self, real_data):
+    def calibrate(self, real_data, test_values, max_t, initial_state, day_eval_freq=1,
+                  verbose=True):
         """
         Performs a grid search over the probabilities of transmission to find
         the values that best fit the real trajectory of new infections.
-        :param real_data: dataframe/array of shape (number of age groups, simulation duration) giving
+        :param real_data: dataframe/array of shape (simulation duration, number of age groups) giving
             the target trajectory for each age group.
-        :return: a dict {activity type: probability} giving the optimal betas.
+        :param test_values: dictionary {activity type: values} where values is a list of probabilities
+            to test for the corresponding activity type.
+        :param max_t: duration of the simulation, in days, last included.
+        :param initial_state: array of shape (n_age_groups, 3) giving the initial (S, I, R) state.
+        :param day_eval_freq: integer; how many times the model should be evaluated per day.
+        :param verbose: boolean, whether to print the current advancement
+        :return: a dict {activity type: probability} giving the optimal betas. The model is also
+            run with those values before returning.
         """
-        pass
+        if self.contact_matrices_ is None:
+            raise ValueError('Please call load_contacts() before calibrating')
+        total_tests = np.prod([len(values) for values in test_values.values()])
+        # Normalizes the data to make each age group span from 0 to 1, so that
+        # the curves for the age group are comparable
+        real_data = (real_data - np.min(real_data, axis=0)) / np.max(real_data, axis=0)
+
+        def evaluate_probas(probas):
+            """
+            Evaluates the error for a set of probabilities
+            """
+            self.set_betas({activity: proba for activity, proba in
+                            zip(test_values.keys(), probas)})
+            self.solve(max_t, lambda: initial_state, day_eval_freq)
+            predicted = np.array(self.new_cases_.iloc[:, :-2])
+            # Normalizes the predicted data
+            predicted = (predicted - np.min(predicted, axis=0)) / np.max(predicted, axis=0)
+            return np.linalg.norm(np.ravel(predicted) - np.ravel(real_data))
+
+        optimal_values, min_error = None, float('+inf')
+        # For each set of probabilities, compute the error
+        for probas in tqdm(product(*test_values.values()), total=total_tests):
+            error = evaluate_probas(probas)
+            if error < min_error:
+                optimal_values = {activity: proba for activity, proba in
+                                  zip(test_values.keys(), probas)}
+                min_error = error
+        # Set the optimal probabilities as the model's
+        self.set_betas(optimal_values)
+
+        return optimal_values
 
     def plot_infections(self, ax=None):
         """
@@ -226,8 +273,7 @@ class AgeGroupsSIR:
         if ax is None:
             fig, ax = plt.subplots(nrows=1, ncols=1)
         # Bar plot of the secondary infections
-        avg_contact_matrix = average_contact_matrix(self.contact_matrices_, self.betas_.values)
-        sec_inf_weights = pd.DataFrame(data={act_type: avg_contact_matrix[:, i]
+        sec_inf_weights = pd.DataFrame(data={act_type: self.avg_contact_matrix_[:, i]
                                              for i, act_type in enumerate(self.betas_.keys())},
                                        index=self.age_groups_names)
         sec_inf_weights.plot.bar(stacked=True, ax=ax)
@@ -258,7 +304,7 @@ class AgeGroupsSIR:
     def plot_fit(self, real_data):
         """
         Plots together the real and predicted trajectories.
-        :param real_data: ndarray of shape (n_age_groups, duration_days) giving the number
+        :param real_data: ndarray of shape (duration_days, n_age_groups) giving the number
             of infections for each day and each age group.
         """
         if self.results_ is None:
@@ -282,7 +328,7 @@ class AgeGroupsSIR:
             # Selects the results for the current age group
             age_group_results = results_long[results_long['age group'] == age_group]
             age_group_results = age_group_results.drop('age group', axis=1)
-            real_traj = real_data[age_group_index]
+            real_traj = real_data[:, age_group_index]
 
             # Adds the real traj to the dataframe so that seaborn plots both trajectories automatically
             # and adjusts the style and legend.
@@ -296,7 +342,8 @@ class AgeGroupsSIR:
 
             # Plots the number of infectious per day per age group, and shows
             # the confidence interval
-            sns.lineplot(data=age_group_results, x="day", y="new infections", hue="Trajectory", style="Trajectory", ax=ax)
+            sns.lineplot(data=age_group_results, x="day", y="new infections", hue="Trajectory", style="Trajectory",
+                         ax=ax)
 
             ax.set_ylabel("Cases")
             ax.set_xlabel("Days")
