@@ -30,16 +30,6 @@ def main():
     state0[:, 0] = age_pops - state0[:, 1]
     rng = np.random.default_rng(seed=42)
 
-    # activity-dependent probabilities of transmission
-    betas = {
-        "work": 0.03,
-        "education": 0.1,
-        "leisure": 0.01,
-        "service": 0.05,
-        "home": 0.05,
-        "shop": 0.03
-    }
-
     def initial_state_func():
         variation = rng.random(3) * 0.4 + 0.8
         return variation * state0
@@ -48,13 +38,33 @@ def main():
     model = AgeGroupsSIR({'age_groups': age_groups,
                           'N': total_pop,
                           'gammas': gammas})
-    model.load_force_of_infection(contacts_csv, betas)
+    model.load_contacts(contacts_csv)
 
     # ============= SOLVING ================= #
-    model.solve(60, initial_state_func, day_eval_freq=4, runs=10)
-    ## fig = model.dashboard()
-    fig = model.plot_fit(np.arange(60 * 3).reshape((3, 60)))
-    fig.savefig("figures/example_run.png")
+    test_probas = np.geomspace(1e-3, 1, 5)
+    values = {
+        "work": test_probas,
+        "education": test_probas,
+        "leisure": test_probas,
+        "service": test_probas,
+        "home": test_probas,
+        "shop": test_probas
+    }
+    """
+    betas = {
+        "work": 0.2,
+        "education": 0.1,
+        "leisure": 0.1,
+        "service": 0.1,
+        "home": 0.1,
+        "shop": 0.1
+    }
+    """
+    real_data = np.load(open('data/example_sim.npy', 'rb'))
+    print(model.calibrate(real_data, values, 148, state0, day_eval_freq=1))
+    # model.set_betas(betas)
+    _ = model.solve(148, initial_state_func, day_eval_freq=4, runs=10)
+    fig = model.plot_fit(real_data)
     fig.show()
     return 0
 

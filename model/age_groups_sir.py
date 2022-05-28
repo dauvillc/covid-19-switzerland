@@ -75,8 +75,9 @@ class AgeGroupsSIR:
 
     def set_betas(self, values):
         """
-        Sets the probabilities of transmission.
-        :param values: dict {activity type: proba, ...}.
+        Sets the probabilities of transmission of the model, then recomputes
+        the force of infection with the new values.
+        :param values: dict {activity type: proba}.
         """
         # Compiles the probabilities of transmission into an array, and makes sure
         # that the order corresponds to that of the contact matrices
@@ -173,8 +174,18 @@ class AgeGroupsSIR:
     def calibrate(self, real_data, test_values, max_t, initial_state, day_eval_freq=1,
                   verbose=True):
         """
-        Performs a grid search over the probabilities of transmission to find
-        the values that best fit the real trajectory of new infections.
+        Optimizes the probability of transmission at every activity type to minimize the
+        Mean Squared Error between the predicted and real trajectories.
+        This is done in two steps:
+        -- Optimize the new infections vector I*:
+            The trajectory depend directly on the vector I* via the SIR equations. The optimal
+            value for I* (whose length is the number of age groups) is found via grid search.
+        -- Optimize the probabilities beta_a:
+            The new infections vector I* depends on the contact matrix (which is fixed) and on the
+            probabilities of transmission at each activity type. The second step tries to find the
+            values for those probabilities which result in I* closest to its optimal value found in
+            the previous step.
+
         :param real_data: dataframe/array of shape (simulation duration, number of age groups) giving
             the target trajectory for each age group.
         :param test_values: dictionary {activity type: values} where values is a list of probabilities
@@ -188,35 +199,45 @@ class AgeGroupsSIR:
         """
         if self.contact_matrices_ is None:
             raise ValueError('Please call load_contacts() before calibrating')
-        total_tests = np.prod([len(values) for values in test_values.values()])
-        # Normalizes the data to make each age group span from 0 to 1, so that
-        # the curves for the age group are comparable
-        real_data = (real_data - np.min(real_data, axis=0)) / np.max(real_data, axis=0)
+        peak_day = np.argmax(np.sum(real_data, axis=1))
+        real_data = real_data[:peak_day]
 
-        def evaluate_probas(probas):
+        # FIRST STEP: Optimize the new infections vector I*
+        # Puts mock values in the new infections
+        self.new_infections_ = np.array([0.1 for _ in range(self.n_age_groups)])
+
+        def evaluate_new_inf():
             """
-            Evaluates the error for a set of probabilities
+            Returns the MSE between the predicted and real trajectories.
             """
-            self.set_betas({activity: proba for activity, proba in
-                            zip(test_values.keys(), probas)})
             self.solve(max_t, lambda: initial_state, day_eval_freq)
             predicted = np.array(self.new_cases_.iloc[:, :-2])
-            # Normalizes the predicted data
-            predicted = (predicted - np.min(predicted, axis=0)) / np.max(predicted, axis=0)
-            return np.linalg.norm(np.ravel(predicted) - np.ravel(real_data))
+            predicted = predicted[:peak_day]
+            # Computes the mean squared error for each age group
+            error = np.sum((predicted - real_data) ** 2, axis=0)
+            # We want to fit all age groups, but their raw MSE aren't comparable
+            # since the scale of the curves differ. We need to normalize the errors
+            # to make them comparable:
+            error = error / np.sum(real_data ** 2, axis=0)
+            return np.sum(error)
 
-        optimal_values, min_error = None, float('+inf')
-        # For each set of probabilities, compute the error
-        for probas in tqdm(product(*test_values.values()), total=total_tests):
-            error = evaluate_probas(probas)
+        # Values for each age group to be tested for the grid search
+        test_values = [np.linspace(0.01, 1, 20) for _ in range(self.n_age_groups)]
+        total_tests = np.prod([len(values) for values in test_values])
+
+        min_error, optimal_new_inf = float("+inf"), None
+        for new_inf in tqdm(product(*test_values), total=total_tests):
+            # Sets the value of the new infections for the current age group to the
+            # value being tested
+            self.new_infections_ = np.array(new_inf)
+            error = evaluate_new_inf()
             if error < min_error:
-                optimal_values = {activity: proba for activity, proba in
-                                  zip(test_values.keys(), probas)}
+                optimal_new_inf = self.new_infections_
                 min_error = error
-        # Set the optimal probabilities as the model's
-        self.set_betas(optimal_values)
 
-        return optimal_values
+        self.new_infections_ = optimal_new_inf
+
+        return optimal_new_inf
 
     def plot_infections(self, ax=None):
         """
