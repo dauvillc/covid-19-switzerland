@@ -12,8 +12,8 @@ import pandas as pd
 from itertools import product
 from copy import deepcopy
 from scipy.integrate import solve_ivp
+from scipy.optimize import minimize, LinearConstraint
 from matplotlib import gridspec
-from tqdm.auto import tqdm
 from .equations import age_groups_SIR_derivative, state_as_vector
 from .contacts import load_population_contacts_csv
 
@@ -50,7 +50,8 @@ class AgeGroupsSIR:
 
         # Attributes related to the computation of the new infections I*
         self.act_types_indices, self.sample_ids, self.contact_matrices_ = None, None, None
-        self.avg_contact_matrix_, self.betas_, self.new_infections_ = None, None, None
+        self.activity_types_ = None
+        self.avg_contact_matrix_, self.probas_, self.new_infections_ = None, None, None
 
         # Attributes filled after the model has been run
         self.solved_states_ = {}
@@ -72,8 +73,9 @@ class AgeGroupsSIR:
         self.act_types_indices, self.sample_ids, self.contact_matrices_ = load_population_contacts_csv(
             contact_matrices_csv)
         self.avg_contact_matrix_ = np.mean(self.contact_matrices_, axis=0)
+        self.activity_types_ = list(self.act_types_indices.keys())
 
-    def set_betas(self, values):
+    def set_activity_probabilities(self, values):
         """
         Sets the probabilities of transmission of the model, then recomputes
         the force of infection with the new values.
@@ -81,23 +83,23 @@ class AgeGroupsSIR:
         """
         # Compiles the probabilities of transmission into an array, and makes sure
         # that the order corresponds to that of the contact matrices
-        betas_array = np.empty((len(self.act_types_indices)), dtype=np.float64)
+        probas_array = np.empty((len(self.act_types_indices)), dtype=np.float64)
         for act_type, index in self.act_types_indices.items():
-            betas_array[index] = values[act_type]
+            probas_array[index] = values[act_type]
 
         # Saves the probabilities of transmission to plot them later
         # This dict is in the same order as the contact matrices' columns
-        self.betas_ = pd.Series(data=betas_array, index=list(self.act_types_indices.keys()))
+        self.probas_ = pd.Series(data=probas_array, index=list(self.act_types_indices.keys()))
 
         # (Re)computes the new infections based on the probabilities of transmission
         if self.contact_matrices_ is None:
-            raise ValueError("Please call load_contacts() before set_betas()")
+            raise ValueError("Please call load_contacts() before set_probas()")
 
         # Computes the new infections vector I* from the average contact matrix and the
         # probabilities of transmission.
         # This vector gives for each age group the daily new infections per Infectious individual
         # in the population.
-        self.new_infections_ = np.sum(self.avg_contact_matrix_ * betas_array, axis=1)
+        self.new_infections_ = np.sum(self.avg_contact_matrix_ * probas_array, axis=1)
 
     def solve(self, max_t, initial_state_func, day_eval_freq=1, runs=1):
         """
@@ -171,8 +173,7 @@ class AgeGroupsSIR:
 
         return deepcopy(self.solved_states_)
 
-    def calibrate(self, real_data, test_values, max_t, initial_state, day_eval_freq=1,
-                  verbose=True):
+    def calibrate(self, real_data, test_values, max_t, initial_state, day_eval_freq=1):
         """
         Optimizes the probability of transmission at every activity type to minimize the
         Mean Squared Error between the predicted and real trajectories.
@@ -180,7 +181,7 @@ class AgeGroupsSIR:
         -- Optimize the new infections vector I*:
             The trajectory depend directly on the vector I* via the SIR equations. The optimal
             value for I* (whose length is the number of age groups) is found via grid search.
-        -- Optimize the probabilities beta_a:
+        -- Optimize the probabilities proba_a:
             The new infections vector I* depends on the contact matrix (which is fixed) and on the
             probabilities of transmission at each activity type. The second step tries to find the
             values for those probabilities which result in I* closest to its optimal value found in
@@ -188,13 +189,11 @@ class AgeGroupsSIR:
 
         :param real_data: dataframe/array of shape (simulation duration, number of age groups) giving
             the target trajectory for each age group.
-        :param test_values: dictionary {activity type: values} where values is a list of probabilities
-            to test for the corresponding activity type.
+        :param test_values: list of values for the new infections to test.
         :param max_t: duration of the simulation, in days, last included.
         :param initial_state: array of shape (n_age_groups, 3) giving the initial (S, I, R) state.
         :param day_eval_freq: integer; how many times the model should be evaluated per day.
-        :param verbose: boolean, whether to print the current advancement
-        :return: a dict {activity type: probability} giving the optimal betas. The model is also
+        :return: a dict {activity type: probability} giving the optimal probas. The model is also
             run with those values before returning.
         """
         if self.contact_matrices_ is None:
@@ -202,7 +201,7 @@ class AgeGroupsSIR:
         peak_day = np.argmax(np.sum(real_data, axis=1))
         real_data = real_data[:peak_day]
 
-        # FIRST STEP: Optimize the new infections vector I*
+        # FIRST STEP: Optimize the new infections vector I*  ----------------------------------------
         # Puts mock values in the new infections
         self.new_infections_ = np.array([0.1 for _ in range(self.n_age_groups)])
 
@@ -218,15 +217,15 @@ class AgeGroupsSIR:
             # We want to fit all age groups, but their raw MSE aren't comparable
             # since the scale of the curves differ. We need to normalize the errors
             # to make them comparable:
-            error = error / np.sum(real_data ** 2, axis=0)
+            error = error / np.sqrt(np.sum(real_data ** 2, axis=0))
             return np.sum(error)
 
-        # Values for each age group to be tested for the grid search
-        test_values = [np.linspace(0.01, 1, 20) for _ in range(self.n_age_groups)]
+        # Total amount of combinations that will be tested
         total_tests = np.prod([len(values) for values in test_values])
+        print(f"Number of combinations to test: {total_tests}")
 
         min_error, optimal_new_inf = float("+inf"), None
-        for new_inf in tqdm(product(*test_values), total=total_tests):
+        for it, new_inf in enumerate(product(*test_values)):
             # Sets the value of the new infections for the current age group to the
             # value being tested
             self.new_infections_ = np.array(new_inf)
@@ -234,10 +233,39 @@ class AgeGroupsSIR:
             if error < min_error:
                 optimal_new_inf = self.new_infections_
                 min_error = error
+            if it % 1000 == 0:
+                print(f"Tested {it + 1} combinations")
 
         self.new_infections_ = optimal_new_inf
+        print("Found optimal new infections I*=", optimal_new_inf)
 
-        return optimal_new_inf
+        # SECOND STEP: OPTIMAL PROBABILITIES  ----------------------------------------------
+        # This is done by minimizing the least square problem in P:
+        # C(I* - CP) = 0
+        # under the constraint 0 < P < 1
+        # where P is the probabilities, C is the contact matrix and I* the optimal new infections
+
+        def squared_error(probas):
+            """
+            Function to optimize: least square problem where the target is the
+            new infections vector I*, the predictors are the contact matrix, and the
+            optimized variable is the probabilities of transmission.
+            """
+            error = self.avg_contact_matrix_ @ probas - optimal_new_inf
+            return error.T @ error
+        nb_types = len(self.activity_types_)
+        initial_guess = np.array([0.1 for _ in range(nb_types)])
+        # Creates a constraint that states: 0 <= P <= 1
+        constraint = LinearConstraint(np.eye(nb_types), np.zeros(nb_types), np.ones(nb_types))
+
+        optimal_probas = minimize(squared_error, initial_guess, constraints=[constraint])['x']
+
+        optimal_probas = {act_type: np.round(val, 3)
+                          for act_type, val in zip(self.activity_types_, optimal_probas)}
+
+        self.set_activity_probabilities(optimal_probas)
+
+        return optimal_probas
 
     def plot_infections(self, ax=None):
         """
@@ -264,10 +292,10 @@ class AgeGroupsSIR:
 
         ax.set_ylabel("Infectious individuals")
         ax.set_xlabel("Days")
-        ax.set_title("Infection trajectory")
+        ax.set_title("Infections trajectory")
         return ax
 
-    def plot_betas(self, ax=None):
+    def plot_probas(self, ax=None):
         """
         Plots the probabilities of transmission.
         :param ax: optional matplotlib axes to use;
@@ -275,13 +303,13 @@ class AgeGroupsSIR:
         if ax is None:
             fig, ax = plt.subplots(nrows=1, ncols=1)
         # Bar plot of the probabilities of transmission
-        sns.barplot(x=self.betas_.index, y=self.betas_.values, ax=ax)
-        for idx, proba in enumerate(self.betas_):
+        sns.barplot(x=self.probas_.index, y=self.probas_.values, ax=ax)
+        for idx, proba in enumerate(self.probas_):
             ax.text(idx, proba, str(proba), horizontalalignment="center")
 
         ax.set_xlabel("Activity type")
         ax.set_ylabel("Prob. of transmission")
-        ax.set_ylim([0, self.betas_.values.max() * 1.2])
+        ax.set_ylim([0, self.probas_.values.max() * 1.2])
         ax.set_title('Activity-wise probabilities of transmission')
         return ax
 
@@ -294,8 +322,8 @@ class AgeGroupsSIR:
         if ax is None:
             fig, ax = plt.subplots(nrows=1, ncols=1)
         # Bar plot of the secondary infections
-        sec_inf_weights = pd.DataFrame(data={act_type: self.avg_contact_matrix_[:, i]
-                                             for i, act_type in enumerate(self.betas_.keys())},
+        sec_inf_weights = pd.DataFrame(data={act_type: self.avg_contact_matrix_[:, i] * proba
+                                             for i, (act_type, proba) in enumerate(self.probas_.items())},
                                        index=self.age_groups_names)
         sec_inf_weights.plot.bar(stacked=True, ax=ax)
 
@@ -317,16 +345,18 @@ class AgeGroupsSIR:
         fig.suptitle("SIR Model Dashboard")
         gs = gridspec.GridSpec(nrows=2, ncols=2, height_ratios=[3, 1], width_ratios=[3, 2])
         self.plot_infections(ax=plt.subplot(gs[0, 0]))
-        self.plot_betas(ax=plt.subplot(gs[1, 0]))
+        self.plot_probas(ax=plt.subplot(gs[1, 0]))
         self.plot_secondary_infections(ax=plt.subplot(gs[:, 1]))
         fig.tight_layout()
         return fig
 
-    def plot_fit(self, real_data):
+    def plot_fit(self, real_data, log=True):
         """
         Plots together the real and predicted trajectories.
         :param real_data: ndarray of shape (duration_days, n_age_groups) giving the number
             of infections for each day and each age group.
+        :param log: boolean, whether to use logarithmic scale for the y axis of the trajectory
+            plot.
         """
         if self.results_ is None:
             raise ValueError("Please call model.solve() before plotting")
@@ -366,9 +396,11 @@ class AgeGroupsSIR:
             sns.lineplot(data=age_group_results, x="day", y="new infections", hue="Trajectory", style="Trajectory",
                          ax=ax)
 
-            ax.set_ylabel("Cases")
+            ax.set_ylabel("New cases")
             ax.set_xlabel("Days")
             ax.set_title(f"Age group {age_group}")
+            if log:
+                ax.set_yscale('log')
 
         fig.tight_layout()
         return fig

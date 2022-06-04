@@ -13,25 +13,25 @@ from model import AgeGroupsSIR
 def main():
     # ============= PARAMETERS ============== #
     # Age groups
-    age_groups = [19, 64]
+    age_groups = [9, 19, 35, 50, 64]
+    n_age_groups = len(age_groups) + 1
 
     # Recovery rate for each age group
-    gammas = np.array([0.2, 0.2, 0.2])
+    gammas = np.array([0.2 for _ in range(n_age_groups)])
 
     # Contact matrices CSV file
     contacts_csv = "data/contact_counts.csv"
 
     # Initial state
     total_pop = 1000000
-    # age_pops = np.array([0.2 * total_pop, 0.65 * total_pop, 0.15 * total_pop])
-    age_pops = np.array([0.33 * total_pop] * 3)
-    state0 = np.zeros((3, 3))
-    state0[:, 1] = np.array([100, 100, 100])  # initial infections
+    age_pops = np.array([0.33 * total_pop] * n_age_groups)
+    state0 = np.zeros((n_age_groups, 3))
+    state0[:, 1] = np.array([100 for _ in range(n_age_groups)])  # initial infections
     state0[:, 0] = age_pops - state0[:, 1]
     rng = np.random.default_rng(seed=42)
 
     def initial_state_func():
-        variation = rng.random(3) * 0.4 + 0.8
+        variation = rng.random((n_age_groups, 1)) * 0.4 + 0.8
         return variation * state0
 
     # ============= MODEL =================== #
@@ -42,29 +42,11 @@ def main():
 
     # ============= SOLVING ================= #
     test_probas = np.geomspace(1e-3, 1, 5)
-    values = {
-        "work": test_probas,
-        "education": test_probas,
-        "leisure": test_probas,
-        "service": test_probas,
-        "home": test_probas,
-        "shop": test_probas
-    }
-    """
-    betas = {
-        "work": 0.2,
-        "education": 0.1,
-        "leisure": 0.1,
-        "service": 0.1,
-        "home": 0.1,
-        "shop": 0.1
-    }
-    """
+    values = [test_probas for _ in range(6)]
     real_data = np.load(open('data/example_sim.npy', 'rb'))
     print(model.calibrate(real_data, values, 148, state0, day_eval_freq=1))
-    # model.set_betas(betas)
     _ = model.solve(148, initial_state_func, day_eval_freq=4, runs=10)
-    fig = model.plot_fit(real_data)
+    fig = model.dashboard()
     fig.show()
     return 0
 

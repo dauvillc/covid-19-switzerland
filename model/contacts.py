@@ -23,10 +23,9 @@ def load_population_contacts_csv(csv_path):
         - matrices is a 3D array of shape (n_people, n_age_groups, n_activity_types)
           such that matrices[i] is the contact matrix for person ids[i];
     """
-    contacts_df = pd.read_csv(csv_path)
+    contacts_df = pd.read_csv(csv_path, index_col=0)
     # Isolates the value columns from the ids
     ids = contacts_df.index.to_numpy(dtype=np.int64)
-    contacts_df = contacts_df.drop('id', axis=1)
     # Converts the columns (id excluded) into a 2D array
     matrices = contacts_df.to_numpy()
 
